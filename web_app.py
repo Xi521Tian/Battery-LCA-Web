@@ -1,8 +1,9 @@
 import streamlit as st
 import pandas as pd
 from docx import Document
-from docx.shared import Pt, Inches
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import Pt, Inches, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT, WD_TAB_LEADER
+from docx.oxml.ns import qn
 import io
 import datetime
 import re
@@ -12,7 +13,7 @@ st.title("🔋 动力电池全生命周期 (LCA) 在线核算与报告系统")
 st.markdown("---")
 
 # ==========================================
-# 🌟 第一步：配置报告基础信息
+# 🌟 第一步：配置报告基础信息 (与上一版完全一致)
 # ==========================================
 st.sidebar.header("📝 填报导航")
 st.sidebar.info("请依次完成基础信息配置与数据录入，系统将自动生成完整的带封面、目录的正式报告。")
@@ -46,7 +47,7 @@ st.markdown("---")
 st.header("第二步：录入生命周期测算数据")
 
 # ==========================================
-# 🌟 第二步：因子库与 UI 结构 (保持上一版的完美映射)
+# 🌟 第二步：因子库与 UI 结构 (与上一版完全一致)
 # ==========================================
 FACTOR_DB = {
     "天然气 (m3)": 2.0667, "厂务电力 (kWh)": 0.6205, "水 (m3)": 0.344, "废水 (t)": 0.118,
@@ -122,31 +123,31 @@ for stage_name, categories in UI_STRUCTURE.items():
             st.divider()
 
 
-# Word 表格辅助函数
+# Word 表格辅助函数 (确保表格内容也是宋体)
 def add_word_table(doc, title, headers, data_rows):
     doc.add_paragraph(title)
     table = doc.add_table(rows=1, cols=len(headers))
     table.style = 'Table Grid'
-    for i, h in enumerate(headers): table.rows[0].cells[i].text = h
+    for i, h in enumerate(headers):
+        table.rows[0].cells[i].text = h
     for r in data_rows:
         row = table.add_row().cells
-        for i, val in enumerate(r): row[i].text = str(val)
+        for i, val in enumerate(r):
+            row[i].text = str(val)
 
 
 # ==========================================
-# 🌟 核心升级：网页端验证、展示图表、生成Word
+# 🌟 第三步：计算与极致排版的 Word 导出
 # ==========================================
 st.markdown("<br>", unsafe_allow_html=True)
 
-if st.button("🚀 提交全部数据，生成完整规范报告", type="primary", use_container_width=True):
-    # 1. 必填项红字警告拦截
+if st.button("🚀 提交全部数据，生成极致排版规范报告", type="primary", use_container_width=True):
     if not company_intro.strip() or not product_intro.strip() or not production_process.strip():
         st.error("❌ 警告：您有必填项未完成！请先在上方【Part 1: 概述】中填写企业简介、产品介绍和产品生产工艺。")
     else:
         total_carbon = sum(results.values())
         st.success("✅ 数据核算完成！")
 
-        # 2. 网页端数据可视化展示 (满足需求4)
         st.markdown("### 📊 本次测算碳足迹概览")
         st.metric(label="🌟 生命周期总碳足迹 (kgCO2e)", value=f"{total_carbon:,.6f}")
 
@@ -154,31 +155,51 @@ if st.button("🚀 提交全部数据，生成完整规范报告", type="primary
         res_data = []
         for stage, em in results.items():
             pct = f"{(em / total_carbon * 100):.4f}" if total_carbon > 0 else "0.0000"
-            res_data.append([stage.split(" ")[1], em, f"{pct}%"])  # 纯数字用于图表
+            res_data.append([stage.split(" ")[1], em, f"{pct}%"])
 
         df_results = pd.DataFrame(res_data, columns=["生命周期阶段", "排放量(kgCO2e)", "占比(%)"])
-
         with col_chart1:
             st.write("**各阶段排放明细表**")
-            # 格式化展示用
             df_display = df_results.copy()
             df_display["排放量(kgCO2e)"] = df_display["排放量(kgCO2e)"].apply(lambda x: f"{x:,.6f}")
             st.dataframe(df_display, hide_index=True)
-
         with col_chart2:
             st.write("**各阶段碳排放量动态柱状图**")
-            # 使用 Streamlit 原生动态柱状图
             st.bar_chart(df_results.set_index("生命周期阶段")["排放量(kgCO2e)"])
 
-        st.info("报告文件已在后台合成完毕，请点击下方按钮下载。")
+        st.info("报告文件排版已完成，请点击下方按钮下载。")
 
         # ==================================
-        # 开始构建 Word 文档
+        # 开始构建 Word 文档 (引入全套强管控排版)
         # ==================================
         doc = Document()
 
-        # 3. 封面 1:1 复刻 (换页)
-        for _ in range(5): doc.add_paragraph()  # 空几行显得正式
+        # 🎯 全局强制字体与样式设定
+        # 1. 设置正文 (Normal) 样式：宋体，12磅，黑色
+        style_normal = doc.styles['Normal']
+        style_normal.font.name = 'Times New Roman'
+        style_normal._element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
+        style_normal.font.size = Pt(12)
+        style_normal.font.color.rgb = RGBColor(0, 0, 0)
+
+        # 2. 设置各级标题样式：黑体，加粗，黑色，统一字号
+        for i in range(1, 4):
+            h_style = doc.styles[f'Heading {i}']
+            h_style.font.name = 'Times New Roman'
+            h_style._element.rPr.rFonts.set(qn('w:eastAsia'), '黑体')
+            h_style.font.color.rgb = RGBColor(0, 0, 0)
+            if i == 1:
+                h_style.font.size = Pt(16)
+                h_style.font.bold = True
+            elif i == 2:
+                h_style.font.size = Pt(14)
+                h_style.font.bold = True
+            elif i == 3:
+                h_style.font.size = Pt(12)
+                h_style.font.bold = True
+
+        # --- 封面生成 ---
+        for _ in range(5): doc.add_paragraph()
         title = doc.add_paragraph()
         title_run = title.add_run('产品碳足迹评价报告')
         title_run.font.size = Pt(26)
@@ -195,45 +216,63 @@ if st.button("🚀 提交全部数据，生成完整规范报告", type="primary
         info_run.font.size = Pt(14)
         info.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-        doc.add_page_break()  # 强制换页
+        doc.add_page_break()
 
-        # 4. 目录 1:1 复刻 (换页)
+        # --- 🎯 极致还原的目录页生成 ---
         doc.add_heading('目录', level=1)
-        toc_text = """1. 概述	1
-1.1 企业简介	1
-1.2 产品介绍	1
-1.3 产品生产工艺	1
-1.4 评价依据和要求	1
-2. 目的和范围定义	2
-2.1 研究目的	2
-2.2 功能单位	2
-2.3 时间范围	2
-2.4 系统边界	2
-2.5 温室气体种类	2
-2.6 取舍原则	3
-3. 生命周期数据清单分析	4
-3.1 数据质量要求	4
-3.2 碳足迹计算方法	5
-3.3 分配	6
-3.4 假设	7
-3.5 生命周期清单数据	7
-3.5.1 原材料获取阶段	7
-3.5.2 生产制造阶段	8
-3.5.3 分销和储存阶段	8
-3.5.4 产品使用阶段	8
-3.5.5 废弃处置阶段	9
-4. 产品碳足迹评价结果	10
-5. 不确定性分析	11
-5.1 不确定性分析方法	11
-5.2 不确定性分析结果	12
-6. 结论	14
-附录：排放因子选择表	15
-参考文献	16"""
-        for line in toc_text.split('\n'):
-            doc.add_paragraph(line)
-        doc.add_page_break()  # 强制换页进入正文
 
-        # ---- 正文 Part 1-6 (逻辑不变，紧接上面) ----
+        # 结构化目录数据：(标题文本, 页码, 缩进层级)
+        toc_lines = [
+            ("1. 概述", "1", 0),
+            ("1.1 企业简介", "1", 1),
+            ("1.2 产品介绍", "1", 1),
+            ("1.3 产品生产工艺", "1", 1),
+            ("1.4 评价依据和要求", "1", 1),
+            ("2. 目的和范围定义", "2", 0),
+            ("2.1 研究目的", "2", 1),
+            ("2.2 功能单位", "2", 1),
+            ("2.3 时间范围", "2", 1),
+            ("2.4 系统边界", "2", 1),
+            ("2.5 温室气体种类", "2", 1),
+            ("2.6 取舍原则", "3", 1),
+            ("3. 生命周期数据清单分析", "4", 0),
+            ("3.1 数据质量要求", "4", 1),
+            ("3.2 碳足迹计算方法", "5", 1),
+            ("3.3 分配", "6", 1),
+            ("3.4 假设", "7", 1),
+            ("3.5 生命周期清单数据", "7", 1),
+            ("3.5.1 原材料获取阶段", "7", 2),
+            ("3.5.2 生产制造阶段", "8", 2),
+            ("3.5.3 分销和储存阶段", "8", 2),
+            ("3.5.4 产品使用阶段", "8", 2),
+            ("3.5.5 废弃处置阶段", "9", 2),
+            ("4. 产品碳足迹评价结果", "10", 0),
+            ("5. 不确定性分析", "11", 0),
+            ("5.1 不确定性分析方法", "11", 1),
+            ("5.2 不确定性分析结果", "12", 1),
+            ("6. 结论", "14", 0),
+            ("附录：排放因子选择表", "15", 0),
+            ("参考文献", "16", 0)
+        ]
+
+        for text, page, level in toc_lines:
+            p = doc.add_paragraph()
+            # 设置缩进
+            p.paragraph_format.left_indent = Pt(level * 20)
+            # 核心黑科技：添加一个靠右对齐的制表符，并使用点作为前导符
+            p.paragraph_format.tab_stops.add_tab_stop(Inches(6.0), WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.DOTS)
+
+            run_title = p.add_run(text)
+            if level == 0: run_title.bold = True  # 一级目录加粗
+
+            p.add_run('\t')  # 触发制表符（生成虚线）
+
+            run_page = p.add_run(page)
+            if level == 0: run_page.bold = True
+
+        doc.add_page_break()
+
+        # --- 正文输出 (自动继承上面的宋体、黑体设置) ---
         doc.add_heading('1. 概述', level=1)
         doc.add_heading('1.1 企业简介', level=2)
         doc.add_paragraph(company_intro)
@@ -329,7 +368,6 @@ if st.button("🚀 提交全部数据，生成完整规范报告", type="primary
         doc.add_paragraph(
             f'体验账号汽车动力电池的产品碳足迹评价，涵盖的时间范围是2026年01月01日至2026年12月31日。功能单位（1个汽车动力电池）的全生命周期碳足迹为 {total_carbon:,.6f} kgCO2e，其中原材料获取、生产制造、分销储存、产品使用、废弃处置阶段的排放占比分别为：{res_data[0][2]}、{res_data[1][2]}、{res_data[2][2]}、{res_data[3][2]}、{res_data[4][2]}。')
 
-        # 5. 附录终极补全版 (涵盖原模版所有大项)
         doc.add_page_break()
         doc.add_heading('附录：排放因子选择表', level=1)
         full_appendix_data = [
