@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
 from docx import Document
-from docx.shared import Pt
+from docx.shared import Pt, Inches
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 import io
 import datetime
 import re
@@ -11,23 +12,21 @@ st.title("🔋 动力电池全生命周期 (LCA) 在线核算与报告系统")
 st.markdown("---")
 
 # ==========================================
-# 🌟 第一步：配置报告基础信息 (彻底补全 Part1 & Part2)
+# 🌟 第一步：配置报告基础信息
 # ==========================================
 st.sidebar.header("📝 填报导航")
-st.sidebar.info("请依次完成基础信息配置与数据录入，系统将自动生成 6 大章节及附录的完整报告。")
+st.sidebar.info("请依次完成基础信息配置与数据录入，系统将自动生成完整的带封面、目录的正式报告。")
 
 st.header("第一步：配置报告基础信息")
 
-# --- Part 1 概述 ---
-with st.expander("📂 Part 1: 概述 (需手动填写)", expanded=True):
-    company_intro = st.text_area("1.1 企业简介", placeholder="请输入企业基本情况...")
-    product_intro = st.text_area("1.2 产品介绍", placeholder="请输入产品型号、规格...")
-    production_process = st.text_area("1.3 产品生产工艺", placeholder="简述生产制造流程...")
+with st.expander("📂 Part 1: 概述 (带*号为必填项)", expanded=True):
+    company_intro = st.text_area("* 1.1 企业简介", placeholder="请输入企业基本情况（必填）...")
+    product_intro = st.text_area("* 1.2 产品介绍", placeholder="请输入产品型号、规格（必填）...")
+    production_process = st.text_area("* 1.3 产品生产工艺", placeholder="简述生产制造流程（必填）...")
 
     def_p1_4 = "基于LCA的评价方法，本产品碳足迹评价报告主要依据了以下标准：国际标准化组织（ISO）发布的《ISO 14067：2018温室气体—产品碳足迹—量化要求与指南》；英国标准协会（BSI）发布的《PAS 2050：2011商品和服务生命周期温室气体排放评价规范》；世界资源研究所（WRI）发布的《温室气体核算体系：产品寿命周期核算与报告标准》。\n依据产品所属行业标准对产品种类规则（Product Category Rules, PCR）的要求，根据体验账号的产品管理规定来定义产品的功能单位、边界、分配等计算原则。"
     evaluation_basis = st.text_area("1.4 评价依据和要求", value=def_p1_4)
 
-# --- Part 2 目的和范围定义 ---
 def_p2_1 = "本报告旨在通过揭示体验账号生产的汽车动力电池全生命周期的产品碳足迹，为体验账号持续开展节能减排工作提供数据参考；为体验账号向价值链相关方开展碳信息披露提供重要内容。"
 def_p2_2 = "本次研究的对象为“汽车动力电池，100kwh”，为了方便输入/输出的量化，保证碳足迹分析结果的可比性，功能单位定义为“1个汽车动力电池”。"
 def_p2_3 = "本次评价汽车动力电池的产品碳足迹，其生产周期为2026年01月01日至2026年12月31日。"
@@ -47,7 +46,7 @@ st.markdown("---")
 st.header("第二步：录入生命周期测算数据")
 
 # ==========================================
-# 🌟 因子库与 UI 结构
+# 🌟 第二步：因子库与 UI 结构 (保持上一版的完美映射)
 # ==========================================
 FACTOR_DB = {
     "天然气 (m3)": 2.0667, "厂务电力 (kWh)": 0.6205, "水 (m3)": 0.344, "废水 (t)": 0.118,
@@ -135,156 +134,280 @@ def add_word_table(doc, title, headers, data_rows):
 
 
 # ==========================================
-# 🌟 一键生成深度还原的 Word 报告 (全章节不打折)
+# 🌟 核心升级：网页端验证、展示图表、生成Word
 # ==========================================
 st.markdown("<br>", unsafe_allow_html=True)
+
 if st.button("🚀 提交全部数据，生成完整规范报告", type="primary", use_container_width=True):
-    total_carbon = sum(results.values())
-    st.success("✅ 报告生成完毕！本次包含了完整的 1-6 章节及附录。")
+    # 1. 必填项红字警告拦截
+    if not company_intro.strip() or not product_intro.strip() or not production_process.strip():
+        st.error("❌ 警告：您有必填项未完成！请先在上方【Part 1: 概述】中填写企业简介、产品介绍和产品生产工艺。")
+    else:
+        total_carbon = sum(results.values())
+        st.success("✅ 数据核算完成！")
 
-    doc = Document()
+        # 2. 网页端数据可视化展示 (满足需求4)
+        st.markdown("### 📊 本次测算碳足迹概览")
+        st.metric(label="🌟 生命周期总碳足迹 (kgCO2e)", value=f"{total_carbon:,.6f}")
 
-    # 封面
-    doc.add_heading('产品碳足迹评价报告', 0).alignment = 1
-    doc.add_paragraph('——汽车动力电池，100kwh\n').alignment = 1
-    doc.add_paragraph(f'报告单位： 体验账号\n编制日期： {datetime.date.today().strftime("%Y年%m月%d日")}\n')
+        col_chart1, col_chart2 = st.columns([1.2, 2])
+        res_data = []
+        for stage, em in results.items():
+            pct = f"{(em / total_carbon * 100):.4f}" if total_carbon > 0 else "0.0000"
+            res_data.append([stage.split(" ")[1], em, f"{pct}%"])  # 纯数字用于图表
 
-    # ---- 修复：Part 1 完全输出 ----
-    doc.add_heading('1. 概述', level=1)
-    doc.add_heading('1.1 企业简介', level=2)
-    doc.add_paragraph(company_intro if company_intro.strip() else "（待补充）")
-    doc.add_heading('1.2 产品介绍', level=2)
-    doc.add_paragraph(product_intro if product_intro.strip() else "（待补充）")
-    doc.add_heading('1.3 产品生产工艺', level=2)
-    doc.add_paragraph(production_process if production_process.strip() else "（待补充）")
-    doc.add_heading('1.4 评价依据和要求', level=2)
-    doc.add_paragraph(evaluation_basis if evaluation_basis.strip() else def_p1_4)
+        df_results = pd.DataFrame(res_data, columns=["生命周期阶段", "排放量(kgCO2e)", "占比(%)"])
 
-    # ---- 修复：Part 2 完全输出 ----
-    doc.add_heading('2. 目的和范围定义', level=1)
-    doc.add_heading('2.1 研究目的', level=2)
-    doc.add_paragraph(purpose if purpose.strip() else def_p2_1)
-    doc.add_heading('2.2 功能单位', level=2)
-    doc.add_paragraph(functional_unit if functional_unit.strip() else def_p2_2)
-    doc.add_heading('2.3 时间范围', level=2)
-    doc.add_paragraph(time_scope if time_scope.strip() else def_p2_3)
-    doc.add_heading('2.4 系统边界', level=2)
-    doc.add_paragraph(system_boundary if system_boundary.strip() else def_p2_4)
-    doc.add_heading('2.5 温室气体种类', level=2)
-    doc.add_paragraph(ghg_types if ghg_types.strip() else def_p2_5)
-    doc.add_heading('2.6 取舍原则', level=2)
-    doc.add_paragraph(cutoff_rules if cutoff_rules.strip() else def_p2_6)
+        with col_chart1:
+            st.write("**各阶段排放明细表**")
+            # 格式化展示用
+            df_display = df_results.copy()
+            df_display["排放量(kgCO2e)"] = df_display["排放量(kgCO2e)"].apply(lambda x: f"{x:,.6f}")
+            st.dataframe(df_display, hide_index=True)
 
-    # ---- Part 3 数据清单输出 ----
-    doc.add_heading('3. 生命周期数据清单分析', level=1)
-    doc.add_heading('3.1 数据质量要求', level=2)
-    doc.add_paragraph(
-        '综合ISO 14067：2018、PAS 2050：2011对数据质量的要求，本次评价产品碳足迹的活动水平和排放因子满足相关性、完整性、一致性、连贯性、透明性、准确性及避免重复计算的要求。')
-    doc.add_heading('3.2 碳足迹计算方法', level=2)
-    doc.add_paragraph('采用公式：E = Σ (AD × EF × GWP) 进行计算。')
-    doc.add_heading('3.3 分配', level=2)
-    doc.add_paragraph(
-        '在无法避免分配的情况下，系统的输入和输出应以反应它们之间潜在的物理关系的方式，在其不同的产品或功能之间进行划分。')
-    doc.add_heading('3.4 假设', level=2)
-    doc.add_paragraph('基于数据可得性与碳足迹核算需求的综合评估，已在合理假设下完成测算。')
-    doc.add_heading('3.5 生命周期清单数据', level=2)
+        with col_chart2:
+            st.write("**各阶段碳排放量动态柱状图**")
+            # 使用 Streamlit 原生动态柱状图
+            st.bar_chart(df_results.set_index("生命周期阶段")["排放量(kgCO2e)"])
 
-    table_idx = 2
-    for stage_name, records in user_records.items():
-        # 这里仅提取阶段名称纯文字，比如把 "3.5.1 原材料获取阶段" 变成 "原材料获取阶段" 方便做表格标题
-        pure_stage_name = stage_name.split(' ')[1]
-        doc.add_heading(stage_name, level=3)
-        mat_data = records["Material"]
-        if mat_data:
-            doc.add_paragraph(f'{pure_stage_name}的清单数据，如表3-{table_idx}所示。')
-            add_word_table(doc, f'表 3-{table_idx}：{pure_stage_name}数据清单', ['名称', '消耗数量', '单位', '类型'],
-                           mat_data)
-            table_idx += 1
-        trans_data = records["Transport"]
-        if trans_data:
-            trans_formatted = [[row[0], "1", "道路运输", "-", row[1], "-"] for row in trans_data]
-            doc.add_paragraph(f'{pure_stage_name}的运输清单数据，如表3-{table_idx}所示。')
-            add_word_table(doc, f'表 3-{table_idx}：{pure_stage_name}运输数据清单',
-                           ['运输物', '路段', '运输方式', '货物重量', '运输里程', '能源消耗'], trans_formatted)
-            table_idx += 1
+        st.info("报告文件已在后台合成完毕，请点击下方按钮下载。")
 
-    # ---- Part 4 结果 ----
-    doc.add_heading('4. 产品碳足迹评价结果', level=1)
-    doc.add_paragraph(
-        f'通过计算，功能单位（1个汽车动力电池）的全生命周期碳足迹为 {total_carbon:,.6f} kgCO2e，单位产品排放量为 {total_carbon:,.6f} kgCO2e/个，碳足迹的整体情况，如表4-1所示。')
-    res_data = []
-    for stage, em in results.items():
-        pct = f"{(em / total_carbon * 100):.4f}" if total_carbon > 0 else "0.0000"
-        res_data.append([stage.split(" ")[1], f"{em:,.6f}", pct])
-    res_data.append(['总计', f"{total_carbon:,.6f}", '100'])
-    add_word_table(doc, '表4-1：产品碳足迹评价结果', ['生命周期阶段', '排放量（kgCO2e）', '占比（%）'], res_data)
+        # ==================================
+        # 开始构建 Word 文档
+        # ==================================
+        doc = Document()
 
-    # ---- 修复：Part 5 满血输出所有的表格 ----
-    doc.add_heading('5. 不确定性分析', level=1)
-    doc.add_heading('5.1 不确定性分析方法', level=2)
-    doc.add_paragraph(
-        '产品碳足迹评价的不确定性分析，采用定性分析法，包括活动水平数据质量评级、排放因子的质量评级。活动水平数据质量评级，如表5-1所示。')
+        # 3. 封面 1:1 复刻 (换页)
+        for _ in range(5): doc.add_paragraph()  # 空几行显得正式
+        title = doc.add_paragraph()
+        title_run = title.add_run('产品碳足迹评价报告')
+        title_run.font.size = Pt(26)
+        title_run.bold = True
+        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-    add_word_table(doc, '表5-1：活动水平数据质量评级', ['质量等级', '描述', '分值'],
-                   [['好', '量测值：实际量测数值...', '5'], ['较好', '计算值：以某合理方法进行计算的数值...', '3'],
-                    ['一般', '理论值/经验值：根据理论推导...', '2'], ['差', '参考文献：由其它文献取得...', '1']])
+        subtitle = doc.add_paragraph()
+        sub_run = subtitle.add_run('——汽车动力电池，100kwh\n\n\n')
+        sub_run.font.size = Pt(16)
+        subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-    doc.add_paragraph(
-        '排放因子质量评级，从时间相关性、地域相关性、技术相关性、数据准确度、方法学等方面评定，具体标准，如表5-2、5-3、5-4、5-5、5-6所示。')
-    add_word_table(doc, '表5-2：排放因子的质量评级-时间相关性', ['时间相关性', '分值'],
-                   [['<5年', '5'], ['5–10年', '3'], ['10–15年', '2'], ['>15年（及未知年份）', '1']])
-    add_word_table(doc, '表5-3：排放因子的质量评级-地域相关性', ['地域相关性', '分值'],
-                   [['完全符合所评估产品生产地点', '5'], ['数据为国家层面的数据', '3'], ['数据为全球平均数据', '1']])
-    add_word_table(doc, '表5-4：排放因子的质量评级-技术相关性', ['技术相关性', '分值'],
-                   [['完全符合所评估产品生产技术', '5'], ['行业平均数据', '3'], ['替代数据', '1']])
-    add_word_table(doc, '表5-5：排放因子的质量评级-数据准确度', ['数据准确度', '分值'],
-                   [['变异性低', '5'], ['变异性未量化，考虑为较低', '3'], ['变异性未量化，考虑为较高', '2'],
-                    ['变异性高', '1']])
-    add_word_table(doc, '表5-6：排放因子的质量评级-方法学', ['方法学的适合性及一致性', '分值'],
-                   [['PAS 2050/补充要求所规定的排放因子', '5'], ['政府/国际政府组织/行业发布的排放因子', '3'],
-                    ['公司/其他机构发布的排放因子', '1']])
+        info = doc.add_paragraph()
+        info_run = info.add_run(f'报告单位： 体验账号\n编制日期： {datetime.date.today().strftime("%Y年%m月%d日")}')
+        info_run.font.size = Pt(14)
+        info.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-    doc.add_heading('5.2 不确定性分析结果', level=2)
-    doc.add_paragraph('汽车动力电池产品碳足迹评价的活动数据和排放因子数据质量分析结果，如表5-7、5-8所示。')
-    add_word_table(doc, '表5-7：活动数据质量分析结果', ['活动数据类别', '活动数据描述', '质量级别', '得分'],
-                   [['原材料类', '', '', ''], ['能源资源类', '', '', ''], ['运输类', '', '', ''],
-                    ['产品使用类', '', '', ''], ['废弃处置类', '', '', '']])
-    add_word_table(doc, '表5-8：排放因子数据质量分析结果', ['排放因子类别', '排放因子描述', '平均得分'],
-                   [['原材料类', '', ''], ['能源资源类', '', ''], ['运输类', '', ''], ['产品使用类', '', ''],
-                    ['废弃处置类', '', '']])
+        doc.add_page_break()  # 强制换页
 
-    # ---- Part 6 结论 ----
-    doc.add_heading('6. 结论', level=1)
-    pcts = [(em / total_carbon * 100) if total_carbon > 0 else 0 for em in results.values()]
-    doc.add_paragraph(
-        f'体验账号汽车动力电池的产品碳足迹评价，涵盖的时间范围是2026年01月01日至2026年12月31日。功能单位（1个汽车动力电池）的全生命周期碳足迹为 {total_carbon:,.6f} kgCO2e，其中原材料获取阶段、生产制造阶段、分销和储存阶段、产品使用阶段、废弃处置阶段的排放占比分别为：{pcts[0]:.2f}%、{pcts[1]:.2f}%、{pcts[2]:.2f}%、{pcts[3]:.2f}%、{pcts[4]:.2f}%。')
+        # 4. 目录 1:1 复刻 (换页)
+        doc.add_heading('目录', level=1)
+        toc_text = """1. 概述	1
+1.1 企业简介	1
+1.2 产品介绍	1
+1.3 产品生产工艺	1
+1.4 评价依据和要求	1
+2. 目的和范围定义	2
+2.1 研究目的	2
+2.2 功能单位	2
+2.3 时间范围	2
+2.4 系统边界	2
+2.5 温室气体种类	2
+2.6 取舍原则	3
+3. 生命周期数据清单分析	4
+3.1 数据质量要求	4
+3.2 碳足迹计算方法	5
+3.3 分配	6
+3.4 假设	7
+3.5 生命周期清单数据	7
+3.5.1 原材料获取阶段	7
+3.5.2 生产制造阶段	8
+3.5.3 分销和储存阶段	8
+3.5.4 产品使用阶段	8
+3.5.5 废弃处置阶段	9
+4. 产品碳足迹评价结果	10
+5. 不确定性分析	11
+5.1 不确定性分析方法	11
+5.2 不确定性分析结果	12
+6. 结论	14
+附录：排放因子选择表	15
+参考文献	16"""
+        for line in toc_text.split('\n'):
+            doc.add_paragraph(line)
+        doc.add_page_break()  # 强制换页进入正文
 
-    # ---- 修复：附录完整输出 ----
-    doc.add_heading('附录：排放因子选择表', level=1)
-    appendix_data = [
-        ['天然气', '天然气', '2.06672', 'kgCO2e/m3', 'Department for Environment'],
-        ['厂务电力', '电力', '0.6205', 'kgCO2e/kWh', 'Ministry of Ecology and Environment'],
-        ['自来水消耗', '自来水', '0.344', 'kgCO2e/m3', 'Department for Environment'],
-        ['正极材料(磷酸铁锂)', '铸铁材料', '1.82', 'kgCO2e/kg', 'China Products Carbon Footprint Factors Database'],
-        ['负极材料(石墨)', '石墨', '5.5', 'kgCO2e/kg', 'China Automotive Data Co. Ltd'],
-        ['电解液', '电解液：六氟磷酸锂', '19.6', 'kgCO2e/kg', 'China Automotive Data Co. Ltd'],
-        ['隔膜', '塑料薄膜包装袋', '3.24', 'kgCO2e/kg', 'China Products Carbon Footprint Factors Database'],
-        ['铝箔', '铝箔', '2.39', 'kgCO2e/kg', 'Korea Environmental Industry Technology Research Institute'],
-        ['铜箔', '铜箔', '12.4', 'kgCO2e/kg', 'Taiwan Environmental Protection Agency'],
-        ['电池壳体(铝合金)', '电池-镍氢电池', '28380', 'kgCO2e/t', 'Department for Environment'],
-        ['木质托盘', '木质托盘48x40', '1.28', 'kgCO2e/kg', 'Scientific Data'],
-        ['公路物流运输', '重型柴油货车运输（载重30t）', '0.078', 'kgCO2e/tkm', '中华人民共和国住房和城乡建设部']
-    ]
-    add_word_table(doc, '附表：系统引用的主要排放因子',
-                   ['排放源名称', '排放因子名称', '排放因子数值', '排放因子单位', '排放因子来源'], appendix_data)
-    doc.add_paragraph(
-        '参考文献：\n[1] 《商品和服务在生命周期内的温室气体排放评价规范》（PAS 2050:2011）\n[2] 《温室气体—产品碳足迹—量化要求与指南》（ISO 14067:2018）')
+        # ---- 正文 Part 1-6 (逻辑不变，紧接上面) ----
+        doc.add_heading('1. 概述', level=1)
+        doc.add_heading('1.1 企业简介', level=2)
+        doc.add_paragraph(company_intro)
+        doc.add_heading('1.2 产品介绍', level=2)
+        doc.add_paragraph(product_intro)
+        doc.add_heading('1.3 产品生产工艺', level=2)
+        doc.add_paragraph(production_process)
+        doc.add_heading('1.4 评价依据和要求', level=2)
+        doc.add_paragraph(evaluation_basis if evaluation_basis.strip() else def_p1_4)
 
-    bio = io.BytesIO()
-    doc.save(bio)
-    st.download_button(
-        label="📥 点击下载完整 6 章节及附录 Word 测算报告",
-        data=bio.getvalue(),
-        file_name="产品碳足迹评价报告_极致完整版.docx",
-        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    )
+        doc.add_heading('2. 目的和范围定义', level=1)
+        doc.add_heading('2.1 研究目的', level=2)
+        doc.add_paragraph(purpose if purpose.strip() else def_p2_1)
+        doc.add_heading('2.2 功能单位', level=2)
+        doc.add_paragraph(functional_unit if functional_unit.strip() else def_p2_2)
+        doc.add_heading('2.3 时间范围', level=2)
+        doc.add_paragraph(time_scope if time_scope.strip() else def_p2_3)
+        doc.add_heading('2.4 系统边界', level=2)
+        doc.add_paragraph(system_boundary if system_boundary.strip() else def_p2_4)
+        doc.add_heading('2.5 温室气体种类', level=2)
+        doc.add_paragraph(ghg_types if ghg_types.strip() else def_p2_5)
+        doc.add_heading('2.6 取舍原则', level=2)
+        doc.add_paragraph(cutoff_rules if cutoff_rules.strip() else def_p2_6)
+
+        doc.add_heading('3. 生命周期数据清单分析', level=1)
+        doc.add_heading('3.1 数据质量要求', level=2)
+        doc.add_paragraph(
+            '综合ISO 14067：2018、PAS 2050：2011对数据质量的要求，本次评价产品碳足迹的活动水平和排放因子满足相关性、完整性、一致性、连贯性、透明性、准确性及避免重复计算的要求。')
+        doc.add_heading('3.2 碳足迹计算方法', level=2)
+        doc.add_paragraph('采用公式：E = Σ (AD × EF × GWP) 进行计算。')
+        doc.add_heading('3.3 分配', level=2)
+        doc.add_paragraph(
+            '在无法避免分配的情况下，系统的输入和输出应以反应它们之间潜在的物理关系的方式，在其不同的产品或功能之间进行划分。')
+        doc.add_heading('3.4 假设', level=2)
+        doc.add_paragraph('基于数据可得性与碳足迹核算需求的综合评估，已在合理假设下完成测算。')
+        doc.add_heading('3.5 生命周期清单数据', level=2)
+
+        table_idx = 2
+        for stage_name, records in user_records.items():
+            pure_stage_name = stage_name.split(' ')[1]
+            doc.add_heading(stage_name, level=3)
+            if records["Material"]:
+                doc.add_paragraph(f'{pure_stage_name}的清单数据，如表3-{table_idx}所示。')
+                add_word_table(doc, f'表 3-{table_idx}：{pure_stage_name}数据清单', ['名称', '消耗数量', '单位', '类型'],
+                               records["Material"])
+                table_idx += 1
+            if records["Transport"]:
+                trans_formatted = [[row[0], "1", "道路运输", "-", row[1], "-"] for row in records["Transport"]]
+                doc.add_paragraph(f'{pure_stage_name}的运输清单数据，如表3-{table_idx}所示。')
+                add_word_table(doc, f'表 3-{table_idx}：{pure_stage_name}运输数据清单',
+                               ['运输物', '路段', '运输方式', '货物重量', '运输里程', '能源消耗'], trans_formatted)
+                table_idx += 1
+
+        doc.add_heading('4. 产品碳足迹评价结果', level=1)
+        doc.add_paragraph(
+            f'通过计算，功能单位（1个汽车动力电池）的全生命周期碳足迹为 {total_carbon:,.6f} kgCO2e，单位产品排放量为 {total_carbon:,.6f} kgCO2e/个，碳足迹的整体情况，如表4-1所示。')
+        res_data_word = [[r[0], f"{r[1]:,.6f}", r[2]] for r in res_data]
+        res_data_word.append(['总计', f"{total_carbon:,.6f}", '100%'])
+        add_word_table(doc, '表4-1：产品碳足迹评价结果', ['生命周期阶段', '排放量（kgCO2e）', '占比（%）'], res_data_word)
+
+        doc.add_heading('5. 不确定性分析', level=1)
+        doc.add_heading('5.1 不确定性分析方法', level=2)
+        doc.add_paragraph(
+            '产品碳足迹评价的不确定性分析，采用定性分析法，包括活动水平数据质量评级、排放因子的质量评级。活动水平数据质量评级，如表5-1所示。')
+        add_word_table(doc, '表5-1：活动水平数据质量评级', ['质量等级', '描述', '分值'],
+                       [['好', '量测值：实际量测数值...', '5'], ['较好', '计算值：以某合理方法进行计算的数值...', '3'],
+                        ['一般', '理论值/经验值：根据理论推导...', '2'], ['差', '参考文献：由其它文献取得...', '1']])
+        doc.add_paragraph(
+            '排放因子质量评级，从时间相关性、地域相关性、技术相关性、数据准确度、方法学等方面评定，具体标准，如表5-2、5-3、5-4、5-5、5-6所示。')
+        add_word_table(doc, '表5-2：排放因子的质量评级-时间相关性', ['时间相关性', '分值'],
+                       [['<5年', '5'], ['5–10年', '3'], ['10–15年', '2'], ['>15年（及未知年份）', '1']])
+        add_word_table(doc, '表5-3：排放因子的质量评级-地域相关性', ['地域相关性', '分值'],
+                       [['完全符合所评估产品生产地点', '5'], ['数据为国家层面的数据', '3'],
+                        ['数据为全球平均数据', '1']])
+        add_word_table(doc, '表5-4：排放因子的质量评级-技术相关性', ['技术相关性', '分值'],
+                       [['完全符合所评估产品生产技术', '5'], ['行业平均数据', '3'], ['替代数据', '1']])
+        add_word_table(doc, '表5-5：排放因子的质量评级-数据准确度', ['数据准确度', '分值'],
+                       [['变异性低', '5'], ['变异性未量化，考虑为较低', '3'], ['变异性未量化，考虑为较高', '2'],
+                        ['变异性高', '1']])
+        add_word_table(doc, '表5-6：排放因子的质量评级-方法学', ['方法学的适合性及一致性', '分值'],
+                       [['PAS 2050/补充要求所规定的排放因子', '5'], ['政府/国际政府组织/行业发布的排放因子', '3'],
+                        ['公司/其他机构发布的排放因子', '1']])
+        doc.add_heading('5.2 不确定性分析结果', level=2)
+        doc.add_paragraph('汽车动力电池产品碳足迹评价的活动数据和排放因子数据质量分析结果，如表5-7、5-8所示。')
+        add_word_table(doc, '表5-7：活动数据质量分析结果', ['活动数据类别', '活动数据描述', '质量级别', '得分'],
+                       [['原材料类', '', '', ''], ['能源资源类', '', '', ''], ['运输类', '', '', ''],
+                        ['产品使用类', '', '', ''], ['废弃处置类', '', '', '']])
+        add_word_table(doc, '表5-8：排放因子数据质量分析结果', ['排放因子类别', '排放因子描述', '平均得分'],
+                       [['原材料类', '', ''], ['能源资源类', '', ''], ['运输类', '', ''], ['产品使用类', '', ''],
+                        ['废弃处置类', '', '']])
+
+        doc.add_heading('6. 结论', level=1)
+        doc.add_paragraph(
+            f'体验账号汽车动力电池的产品碳足迹评价，涵盖的时间范围是2026年01月01日至2026年12月31日。功能单位（1个汽车动力电池）的全生命周期碳足迹为 {total_carbon:,.6f} kgCO2e，其中原材料获取、生产制造、分销储存、产品使用、废弃处置阶段的排放占比分别为：{res_data[0][2]}、{res_data[1][2]}、{res_data[2][2]}、{res_data[3][2]}、{res_data[4][2]}。')
+
+        # 5. 附录终极补全版 (涵盖原模版所有大项)
+        doc.add_page_break()
+        doc.add_heading('附录：排放因子选择表', level=1)
+        full_appendix_data = [
+            ['废弃电池结构胶', '电池 - 镍氢电池', '28380', 'kgCO₂e/t', '英国环境、食品及农村事务部 (DEFRA)'],
+            ['废弃绝缘材料', '铸铁材料', '1.82', 'kgCO₂e/kg', '中国产品全生命周期温室气体排放系数库'],
+            ['回收清洗废水', '废水处理', '0.8581', 'kgCO₂e/m³', '澳大利亚生命周期清单数据库'],
+            ['动力电池回收拆解耗电', '电池 - 镍氢电池', '28380', 'kgCO₂e/t', '英国环境、食品及农村事务部 (DEFRA)'],
+            ['车辆行驶充电耗电', '汽车', '207.8', 'gCO₂e/km', '中国产品全生命周期温室气体排放系数库'],
+            ['电池热管理系统耗电', '电池 - 镍氢电池', '28380', 'kgCO₂e/t', '英国环境、食品及农村事务部 (DEFRA)'],
+            ['仓储温控耗电', '仓储', '24.404', 'kgCO₂e/㎡', '碳阻迹（北京）科技有限公司'],
+            ['有机废气', '煤矿废气', '56.8', 'kgCO₂e/GJ', '澳大利亚气候变化和能源部'],
+            ['光伏发电电力', '电力碳足迹', '0.65', 'kgCO₂e/度', '台湾“行政院环境保护署”'],
+            ['电芯涂布烘干耗电', '涂布纸', '0.7999', 'kgCO₂e/kg', '澳大利亚生命周期清单数据库'],
+            ['辊压工序耗电', '炼焦工序', '520', 'kgCO₂e/t', '哈尔滨工业大学'],
+            ['电芯注液耗电', '液氧', '0.39', 'kgCO₂e/kg', '台湾“行政院环境保护署”'],
+            ['化成分容耗电', '商业用电', '29.08', 'tCO₂e/百万日元', '日本环境省'],
+            ['模组焊接耗电', '焊接和焊接设备制造', '0.249', 'kgCO₂e/美元', '美国环保署'],
+            ['Pack装配耗电', '商业用电', '468', 'tCO₂e/百万kWh', '日本环境省'],
+            ['纸质护角', '纸质包装面包片', '1.131', 'kgCO₂e/个', '中国产品全生命周期温室气体排放系数库'],
+            ['电池结构胶', '电池 - 镍氢电池', '28380', 'kgCO₂e/t', '英国环境、食品及农村事务部 (DEFRA)'],
+            ['绝缘材料', '隔热（或隔音、绝缘）材料', '1852.0809', 'kgCO₂e/t', '英国环境、食品及农村事务部 (DEFRA)'],
+            ['电解质锂盐', '盐-零售', '0.01', 'kgCO₂e/kg', '丹麦绿色智库CONCITO'],
+            ['导电剂', '灭菌剂', '3.9', 'tCO₂e/t', '四川大学'],
+            ['粘结剂', '明胶，粘合剂', '0.00223', 'tCO₂e/kg', '日本环境省'],
+            ['主料2', '磷酸铁锂', '25', 'kgCO₂e/kg', '中国产品全生命周期温室气体排放系数库'],
+            ['主料1', '电池', '6308', 'kgCO₂e/t', '英国环境、食品及农村事务部 (DEFRA)'],
+            ['废弃正极材料', '铸铁材料', '1.82', 'kgCO₂e/kg', 'China Products Carbon Footprint Factors Database'],
+            ['废弃负极材料', '铸铁材料', '1.82', 'kgCO₂e/kg', 'China Products Carbon Footprint Factors Database'],
+            ['废弃电解液', '电解液：六氟磷酸锂', '19.6', 'kgCO₂e/kg', 'China Automotive Data Co. Ltd'],
+            ['废弃隔膜', '再生料-废容器-PET废塑胶片', '0.39', 'kgCO₂e/kg', 'Carbon Footprint Taiwan MOEVN 20'],
+            ['废弃铝箔', '铝箔', '2.39', 'kgCO₂e/kg', 'Korea Environmental Industry Technology Research Institute'],
+            ['废弃铜箔', '铜箔', '12.4', 'kgCO₂e/kg', 'Taiwan Environmental Protection Agency'],
+            ['废弃电池管理系统（BMS）', '电池 - 镍氢电池', '28380', 'kgCO₂e/t', 'Department for Environment'],
+            ['废弃电池壳体（铝合金）', '电池 - 镍氢电池', '28380', 'kgCO₂e/t', 'Department for Environment'],
+            ['废弃冷却系统（水冷板）', '自来水', '0.167', 'kgCO₂e/m³', 'Taiwan Environmental Protection Agency'],
+            ['废弃连接件（铜排）', '再生料-废铜', '0.14', 'kgCO₂e/kg', 'Carbon Footprint Taiwan MOEVN 20'],
+            ['电力', '电力', '0.6205', 'kgCO₂e/kWh', 'Ministry of Ecology and Environment'],
+            ['废水', '工业废水', '0.1185', 'kgCO₂e/t', 'New Zealand Ministry of the Environment'],
+            ['水', '水', '0.344', 'kgCO₂e/m³', 'Department for Environment'],
+            ['天然气', '天然气', '2.06672', 'kgCO₂e/m³', 'Department for Environment'],
+            ['木质托盘', '木质托盘48x40', '1.28', 'kgCO₂e/kg', 'Scientific Data'],
+            ['塑料薄膜', '塑料：普通塑料', '3172.49932', 'kgCO₂e/t', 'Department for Environment'],
+            ['电池管理系统（BMS）', '电池 - 镍氢电池', '28380', 'kgCO₂e/t', 'Department for Environment'],
+            ['电池壳体（铝合金）', '电池 - 镍氢电池', '28380', 'kgCO₂e/t', 'Department for Environment'],
+            ['冷却系统（水冷板）', '自来水', '0.167', 'kgCO₂e/m³', 'Taiwan Environmental Protection Agency'],
+            ['连接件（铜排）', '铜箔', '12.4', 'kgCO₂e/kg', 'Carbon Footprint Taiwan MOEVN 20'],
+            ['正极材料（磷酸铁锂）', '铸铁材料', '1.82', 'kgCO₂e/kg', 'China Products Carbon Footprint Factors Database'],
+            ['负极材料（石墨）', '石墨', '5.5', 'kgCO₂e/kg', 'China Automotive Data Co. Ltd'],
+            ['电解液', '电解液：六氟磷酸锂', '19.6', 'kgCO₂e/kg', 'China Automotive Data Co. Ltd'],
+            ['隔膜', '塑料薄膜包装袋', '3.24', 'kgCO₂e/kg', 'China Products Carbon Footprint Factors Database'],
+            ['铝箔', '铝箔', '2.39', 'kgCO₂e/kg', 'Korea Environmental Industry Technology Research Institute'],
+            ['铜箔', '铜箔', '12.4', 'kgCO₂e/kg', 'Taiwan Environmental Protection Agency'],
+            ['电池仓储周转运输', '重型柴油货车运输（载重30t）', '0.078', 'kgCO₂e/吨公里',
+             '中华人民共和国住房和城乡建设部'],
+            ['正极材料运输', '货运火车', '0.02782', 'kgCO₂e/tkm', '英国环境、食品及农村事务部 (DEFRA)'],
+            ['负极材料运输', '货运火车', '0.02782', 'kgCO₂e/tkm', '英国环境、食品及农村事务部 (DEFRA)'],
+            ['电解液运输', '重型柴油货车运输（载重30t）', '0.078', 'kgCO₂e/吨公里', '中华人民共和国住房和城乡建设部'],
+            ['隔膜运输', '重型柴油货车运输（载重30t）', '0.078', 'kgCO₂e/吨公里', '中华人民共和国住房和城乡建设部'],
+            ['铝箔运输', '中型柴油货车运输（载重8t）', '0.179', 'kgCO₂e/吨公里', '中华人民共和国住房和城乡建设部'],
+            ['铜箔运输', '重型柴油货车运输（载重30t）', '0.078', 'kgCO₂e/吨公里', '中华人民共和国住房和城乡建设部'],
+            ['辅料运输', '重型柴油货车运输（载重30t）', '0.078', 'kgCO₂e/吨公里', '中华人民共和国住房和城乡建设部'],
+            ['废弃电池运输', '重型柴油货车运输（载重30t）', '0.078', 'kgCO₂e/tkm', '中华人民共和国住房和城乡建设部'],
+            ['废弃包装材料运输', '重型柴油货车运输（载重30t）', '0.078', 'kgCO₂e/tkm', '中华人民共和国住房和城乡建设部'],
+            ['汽车动力电池成品运输', '重型柴油货车运输（载重30t）', '0.078', 'kgCO₂e/tkm',
+             '中华人民共和国住房和城乡建设部']
+        ]
+        add_word_table(doc, '附表：系统引用的主要排放因子',
+                       ['排放源名称', '排放因子名称', '排放因子数值', '排放因子单位', '排放因子来源'],
+                       full_appendix_data)
+        doc.add_paragraph(
+            '\n参考文献：\n[1] 《商品和服务在生命周期内的温室气体排放评价规范》（PAS 2050:2011）\n[2] 《温室气体—产品碳足迹—量化要求与指南》（ISO 14067:2018）\n[3] 《温室气体核算体系：产品寿命周期核算与报告标准》\n[4] 《IPCC WGI Sixth Assessment Report》')
+
+        bio = io.BytesIO()
+        doc.save(bio)
+
+        st.download_button(
+            label="📥 点击下载极致排版 Word 测算报告",
+            data=bio.getvalue(),
+            file_name="产品碳足迹评价报告_极致排版版.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
