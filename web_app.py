@@ -13,7 +13,7 @@ st.title("🔋 动力电池全生命周期 (LCA) 在线核算与报告系统")
 st.markdown("---")
 
 # ==========================================
-# 🌟 第一步：配置报告基础信息 (与上一版完全一致)
+# 🌟 第一步：配置报告基础信息
 # ==========================================
 st.sidebar.header("📝 填报导航")
 st.sidebar.info("请依次完成基础信息配置与数据录入，系统将自动生成完整的带封面、目录的正式报告。")
@@ -47,7 +47,7 @@ st.markdown("---")
 st.header("第二步：录入生命周期测算数据")
 
 # ==========================================
-# 🌟 第二步：因子库与 UI 结构 (与上一版完全一致)
+# 🌟 第二步：因子库与预设 UI 结构
 # ==========================================
 FACTOR_DB = {
     "天然气 (m3)": 2.0667, "厂务电力 (kWh)": 0.6205, "水 (m3)": 0.344, "废水 (t)": 0.118,
@@ -101,9 +101,10 @@ UI_STRUCTURE = {
 user_records = {}
 results = {stage: 0.0 for stage in UI_STRUCTURE.keys()}
 
+# 渲染预设项目的填报
 for stage_name, categories in UI_STRUCTURE.items():
     user_records[stage_name] = {"Material": [], "Transport": []}
-    with st.expander(f"⚙️ 展开录入：{stage_name}", expanded=False):
+    with st.expander(f"⚙️ 展开录入预设清单：{stage_name}", expanded=False):
         for cat_name, items in categories.items():
             st.markdown(f"**📍 {cat_name}**")
             cols = st.columns(3)
@@ -122,8 +123,49 @@ for stage_name, categories in UI_STRUCTURE.items():
                     results[stage_name] += val * factor
             st.divider()
 
+# ==========================================
+# 🌟 核心新功能：补充自定义排放清单 (交互式表格)
+# ==========================================
+st.markdown("### ➕ 补充自定义排放清单")
+st.info(
+    "如果实际生产中存在上述预设清单未涵盖的物料、能耗或运输过程，请在下方表格点击空白行手动添加。系统会自动计入对应阶段。")
 
-# Word 表格辅助函数 (确保表格内容也是宋体)
+stage_options = list(UI_STRUCTURE.keys())
+custom_df_init = pd.DataFrame(
+    columns=["所属生命周期阶段", "排放源名称", "消耗数量", "单位", "排放因子数值 (kgCO2e/单位)"])
+
+# 渲染可交互的数据表格
+custom_inputs = st.data_editor(
+    custom_df_init,
+    column_config={
+        "所属生命周期阶段": st.column_config.SelectboxColumn("所属生命周期阶段", options=stage_options, required=True),
+        "排放源名称": st.column_config.TextColumn("排放源名称 (如: 新型溶剂)", required=True),
+        "消耗数量": st.column_config.NumberColumn("消耗数量", min_value=0.0, default=0.0, required=True),
+        "单位": st.column_config.TextColumn("单位 (如: kg, L)", required=True),
+        "排放因子数值 (kgCO2e/单位)": st.column_config.NumberColumn("排放因子数值", default=0.0, required=True),
+    },
+    num_rows="dynamic",
+    use_container_width=True,
+    key="custom_data_editor"
+)
+
+# 处理用户手填的自定义数据
+for index, row in custom_inputs.iterrows():
+    c_stage = row.get("所属生命周期阶段")
+    c_name = row.get("排放源名称")
+    c_val = row.get("消耗数量")
+    c_unit = row.get("单位")
+    c_factor = row.get("排放因子数值 (kgCO2e/单位)")
+
+    # 确保填完整了才计算，防止报错
+    if pd.notna(c_stage) and pd.notna(c_name) and pd.notna(c_val) and pd.notna(c_factor):
+        if c_stage in results:
+            results[c_stage] += c_val * c_factor
+            # 标记类型为“自定义补充”，它会自动被后面的 Word 生成器抓取并写入表格
+            user_records[c_stage]["Material"].append((c_name, c_val, c_unit if pd.notna(c_unit) else "-", "自定义补充"))
+
+
+# Word 表格辅助函数
 def add_word_table(doc, title, headers, data_rows):
     doc.add_paragraph(title)
     table = doc.add_table(rows=1, cols=len(headers))
@@ -175,14 +217,12 @@ if st.button("🚀 提交全部数据，生成极致排版规范报告", type="p
         doc = Document()
 
         # 🎯 全局强制字体与样式设定
-        # 1. 设置正文 (Normal) 样式：宋体，12磅，黑色
         style_normal = doc.styles['Normal']
         style_normal.font.name = 'Times New Roman'
         style_normal._element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
         style_normal.font.size = Pt(12)
         style_normal.font.color.rgb = RGBColor(0, 0, 0)
 
-        # 2. 设置各级标题样式：黑体，加粗，黑色，统一字号
         for i in range(1, 4):
             h_style = doc.styles[f'Heading {i}']
             h_style.font.name = 'Times New Roman'
@@ -221,7 +261,6 @@ if st.button("🚀 提交全部数据，生成极致排版规范报告", type="p
         # --- 🎯 极致还原的目录页生成 ---
         doc.add_heading('目录', level=1)
 
-        # 结构化目录数据：(标题文本, 页码, 缩进层级)
         toc_lines = [
             ("1. 概述", "1", 0),
             ("1.1 企业简介", "1", 1),
@@ -257,22 +296,18 @@ if st.button("🚀 提交全部数据，生成极致排版规范报告", type="p
 
         for text, page, level in toc_lines:
             p = doc.add_paragraph()
-            # 设置缩进
             p.paragraph_format.left_indent = Pt(level * 20)
-            # 核心黑科技：添加一个靠右对齐的制表符，并使用点作为前导符
             p.paragraph_format.tab_stops.add_tab_stop(Inches(6.0), WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.DOTS)
 
             run_title = p.add_run(text)
-            if level == 0: run_title.bold = True  # 一级目录加粗
-
-            p.add_run('\t')  # 触发制表符（生成虚线）
-
+            if level == 0: run_title.bold = True
+            p.add_run('\t')
             run_page = p.add_run(page)
             if level == 0: run_page.bold = True
 
         doc.add_page_break()
 
-        # --- 正文输出 (自动继承上面的宋体、黑体设置) ---
+        # --- 正文输出 ---
         doc.add_heading('1. 概述', level=1)
         doc.add_heading('1.1 企业简介', level=2)
         doc.add_paragraph(company_intro)
@@ -316,6 +351,7 @@ if st.button("🚀 提交全部数据，生成极致排版规范报告", type="p
             doc.add_heading(stage_name, level=3)
             if records["Material"]:
                 doc.add_paragraph(f'{pure_stage_name}的清单数据，如表3-{table_idx}所示。')
+                # 预设数据和手填补充数据都会在这里打印出来！
                 add_word_table(doc, f'表 3-{table_idx}：{pure_stage_name}数据清单', ['名称', '消耗数量', '单位', '类型'],
                                records["Material"])
                 table_idx += 1
